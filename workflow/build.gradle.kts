@@ -78,6 +78,7 @@ android {
         "META-INF/sun-jaxb.episode",
         "META-INF/DEPENDENCIES",
         "META-INF/LGPL-3.0.txt",
+        "META-INF/LICENSE.md",
         "readme.html"
       )
     )
