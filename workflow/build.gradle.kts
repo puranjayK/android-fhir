@@ -74,12 +74,24 @@ android {
     resources.excludes.addAll(
       listOf(
         "license.html",
+        "META-INF/ASL2.0",
         "META-INF/ASL-2.0.txt",
-        "META-INF/sun-jaxb.episode",
         "META-INF/DEPENDENCIES",
         "META-INF/LGPL-3.0.txt",
+        "META-INF/LICENSE",
+        "META-INF/LICENSE.txt",
+        "META-INF/license.txt",
+        "META-INF/license.html",
         "META-INF/LICENSE.md",
-        "readme.html"
+        "META-INF/NOTICE",
+        "META-INF/NOTICE.txt",
+        "META-INF/NOTICE.md",
+        "META-INF/notice.txt",
+        "META-INF/LGPL-3.0.txt",
+        "META-INF/sun-jaxb.episode",
+        "META-INF/sun-jaxb.episode",
+        "META-INF/*.kotlin_module",
+        "readme.html",
       )
     )
   }
@@ -96,6 +108,13 @@ configurations {
     exclude(module = "xpp3")
     exclude(module = "hamcrest-all")
     exclude(module = "javax.activation")
+    exclude(group = "org.apache.httpcomponents")
+    exclude(module = "activation", group = "javax.activation")
+    exclude(module = "javaee-api", group = "javax")
+    exclude(module = "hamcrest-all")
+    exclude(module = "javax.activation")
+    exclude(group = "xml-apis")
+    exclude(group = "org.eclipse.persistence")
   }
 }
 
@@ -134,8 +153,3 @@ dependencies {
   testImplementation(Dependencies.robolectric)
   testImplementation(Dependencies.truth)
 }
-
-// dependencies {
-//
-//
-// }
