@@ -42,7 +42,7 @@ class QuestionnaireResponseValidatorTest {
   }
 
   @Test
-  fun shouldReturnValidResult() {
+  fun validateQuestionnaireResponseAnswers_shouldReturnValidResult() {
     val questionnaire =
       Questionnaire()
         .addItem(
@@ -70,11 +70,11 @@ class QuestionnaireResponseValidatorTest {
         questionnaireResponse.item,
         context
       )
-    assertThat(result.get("a-question")).isEqualTo(listOf(ValidationResult(true, listOf())))
+    assertThat(result["a-question"]).isEqualTo(listOf(ValidationResult(true, listOf())))
   }
 
   @Test
-  fun shouldReturnInvalidResultWithMessages() {
+  fun validateQuestionnaireResponseAnswers_shouldReturnInvalidResultWithMessages() {
     val questionnaire =
       Questionnaire()
         .addItem(
@@ -102,7 +102,7 @@ class QuestionnaireResponseValidatorTest {
         questionnaireResponse.item,
         context
       )
-    assertThat(result.get("a-question"))
+    assertThat(result["a-question"])
       .isEqualTo(
         listOf(
           ValidationResult(
@@ -114,7 +114,7 @@ class QuestionnaireResponseValidatorTest {
   }
 
   @Test
-  fun shouldReturnInvalidResultWithMessages_forNestedItems() {
+  fun validateQuestionnaireResponseAnswers_shouldReturnInvalidResultWithMessages_forNestedItems() {
     val questionnaire =
       Questionnaire()
         .addItem(
@@ -159,14 +159,76 @@ class QuestionnaireResponseValidatorTest {
         questionnaireResponse.item,
         context
       )
-    assertThat(result.get("a-question"))
+    assertThat(result["a-question"])
       .containsExactly(
         ValidationResult(
           false,
           listOf("The maximum number of characters that are permitted in the answer is: 3")
         )
       )
-    assertThat(result.get("a-nested-question"))
+    assertThat(result["a-nested-question"])
+      .containsExactly(
+        ValidationResult(
+          false,
+          listOf("The maximum number of characters that are permitted in the answer is: 3")
+        )
+      )
+  }
+
+  @Test
+  fun checkQuestionnaireResponse() {
+    val questionnaire =
+      Questionnaire()
+        .addItem(
+          Questionnaire.QuestionnaireItemComponent()
+            .setLinkId("a-question")
+            .setMaxLength(3)
+            .setType(Questionnaire.QuestionnaireItemType.INTEGER)
+            .setText("Age in years?")
+            .addItem(
+              Questionnaire.QuestionnaireItemComponent()
+                .setLinkId("a-nested-question")
+                .setMaxLength(3)
+                .setType(Questionnaire.QuestionnaireItemType.STRING)
+                .setText("Country code")
+            )
+        )
+    val questionnaireResponse =
+      QuestionnaireResponse()
+        .addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent()
+            .setLinkId("a-question")
+            .setAnswer(
+              listOf(
+                QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent()
+                  .setValue(IntegerType(1000))
+                  .addItem(
+                    QuestionnaireResponse.QuestionnaireResponseItemComponent()
+                      .setLinkId("a-nested-question")
+                      .setAnswer(
+                        listOf(
+                          QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent()
+                            .setValue(StringType("ABCD"))
+                        )
+                      )
+                  )
+              )
+            )
+        )
+    val result =
+      QuestionnaireResponseValidator.validateQuestionnaireResponseAnswers(
+        questionnaire.item,
+        questionnaireResponse.item,
+        context
+      )
+    assertThat(result["a-question"])
+      .containsExactly(
+        ValidationResult(
+          false,
+          listOf("The maximum number of characters that are permitted in the answer is: 3")
+        )
+      )
+    assertThat(result["a-nested-question"])
       .containsExactly(
         ValidationResult(
           false,
