@@ -20,10 +20,22 @@ import android.content.Context
 import android.os.Build
 import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
+import org.hl7.fhir.r4.model.Attachment
+import org.hl7.fhir.r4.model.BooleanType
+import org.hl7.fhir.r4.model.Coding
+import org.hl7.fhir.r4.model.DateTimeType
+import org.hl7.fhir.r4.model.DateType
+import org.hl7.fhir.r4.model.DecimalType
+import org.hl7.fhir.r4.model.Enumeration
 import org.hl7.fhir.r4.model.IntegerType
+import org.hl7.fhir.r4.model.Quantity
 import org.hl7.fhir.r4.model.Questionnaire
 import org.hl7.fhir.r4.model.QuestionnaireResponse
+import org.hl7.fhir.r4.model.Reference
 import org.hl7.fhir.r4.model.StringType
+import org.hl7.fhir.r4.model.TimeType
+import org.hl7.fhir.r4.model.UrlType
+import org.junit.Assert.assertThrows
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -176,64 +188,1031 @@ class QuestionnaireResponseValidatorTest {
   }
 
   @Test
-  fun checkQuestionnaireResponse() {
-    val questionnaire =
-      Questionnaire()
-        .addItem(
-          Questionnaire.QuestionnaireItemComponent()
-            .setLinkId("a-question")
-            .setMaxLength(3)
-            .setType(Questionnaire.QuestionnaireItemType.INTEGER)
-            .setText("Age in years?")
-            .addItem(
-              Questionnaire.QuestionnaireItemComponent()
-                .setLinkId("a-nested-question")
-                .setMaxLength(3)
-                .setType(Questionnaire.QuestionnaireItemType.STRING)
-                .setText("Country code")
+  fun `check fails if questionnaire response does not match questionnaire`() {
+    assertCheckQuestionnaireResponseThrowsIllegalArgumentException(
+      Questionnaire().apply { id = "questionnaire-1" },
+      QuestionnaireResponse().apply { questionnaire = "questionnaire-2" },
+      "Mismatching Questionnaire questionnaire-1 and QuestionnaireResponse (for Questionnaire questionnaire-2)"
+    )
+  }
+
+  @Test
+  fun `check fails if questionnaire response item has no matching questionnaire item`() {
+    assertCheckQuestionnaireResponseThrowsIllegalArgumentException(
+      Questionnaire().apply { id = "questionnaire-1" },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")))
+      },
+      "Missing questionnaire item for questionnaire response item question-1"
+    )
+  }
+
+  @Test
+  fun `check passes for questionnaire item type DISPLAY`() {
+    QuestionnaireResponseValidator.checkQuestionnaireResponse(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("display-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.DISPLAY
             )
+          )
         )
-    val questionnaireResponse =
-      QuestionnaireResponse()
-        .addItem(
-          QuestionnaireResponse.QuestionnaireResponseItemComponent()
-            .setLinkId("a-question")
-            .setAnswer(
-              listOf(
-                QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent()
-                  .setValue(IntegerType(1000))
-                  .addItem(
-                    QuestionnaireResponse.QuestionnaireResponseItemComponent()
-                      .setLinkId("a-nested-question")
-                      .setAnswer(
-                        listOf(
-                          QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent()
-                            .setValue(StringType("ABCD"))
-                        )
-                      )
-                  )
-              )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("display-1")))
+      }
+    )
+  }
+
+  @Test
+  fun `check passes for questionnaire item type NULL`() {
+    QuestionnaireResponseValidator.checkQuestionnaireResponse(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("null-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.NULL
             )
+          )
         )
-    val result =
-      QuestionnaireResponseValidator.validateQuestionnaireResponseAnswers(
-        questionnaire.item,
-        questionnaireResponse.item,
-        context
-      )
-    assertThat(result["a-question"])
-      .containsExactly(
-        ValidationResult(
-          false,
-          listOf("The maximum number of characters that are permitted in the answer is: 3")
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("null-1")))
+      }
+    )
+  }
+
+  @Test
+  fun `check recursively for questionnaire item type GROUP`() {
+    assertCheckQuestionnaireResponseThrowsIllegalArgumentException(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("group-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.GROUP
+            )
+          )
         )
-      )
-    assertThat(result["a-nested-question"])
-      .containsExactly(
-        ValidationResult(
-          false,
-          listOf("The maximum number of characters that are permitted in the answer is: 3")
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("group-1")).apply {
+            addItem(
+              QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1"))
+            )
+          }
         )
-      )
+      },
+      "Missing questionnaire item for questionnaire response item question-1"
+    )
+  }
+
+  @Test
+  fun `check fails if there are too many answers`() {
+    assertCheckQuestionnaireResponseThrowsIllegalArgumentException(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.INTEGER
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = IntegerType(1)
+              }
+            )
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = IntegerType(2)
+              }
+            )
+          }
+        )
+      },
+      "Multiple answers for non-repeats questionnaire item question-1"
+    )
+  }
+
+  @Test
+  fun `check passes if boolean type question has boolean type answer`() {
+    QuestionnaireResponseValidator.checkQuestionnaireResponse(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.BOOLEAN
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = BooleanType(true)
+              }
+            )
+          }
+        )
+      }
+    )
+  }
+
+  @Test
+  fun `check fails if boolean type question has answer of wrong type`() {
+    assertCheckQuestionnaireResponseThrowsIllegalArgumentException(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.BOOLEAN
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = IntegerType(1)
+              }
+            )
+          }
+        )
+      },
+      "Mismatching question type BOOLEAN and answer type integer"
+    )
+  }
+
+  @Test
+  fun `check passes if decimal type question has decimal type answer`() {
+    QuestionnaireResponseValidator.checkQuestionnaireResponse(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.DECIMAL
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = DecimalType(1.0)
+              }
+            )
+          }
+        )
+      }
+    )
+  }
+
+  @Test
+  fun `check fails if decimal type question has answer of wrong type`() {
+    assertCheckQuestionnaireResponseThrowsIllegalArgumentException(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.DECIMAL
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = IntegerType(1)
+              }
+            )
+          }
+        )
+      },
+      "Mismatching question type DECIMAL and answer type integer"
+    )
+  }
+
+  @Test
+  fun `check passes if integer type question has integer type answer`() {
+    QuestionnaireResponseValidator.checkQuestionnaireResponse(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.INTEGER
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = IntegerType(1)
+              }
+            )
+          }
+        )
+      }
+    )
+  }
+
+  @Test
+  fun `check fails if integer type question has answer of wrong type`() {
+    assertCheckQuestionnaireResponseThrowsIllegalArgumentException(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.INTEGER
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = DecimalType(1.0)
+              }
+            )
+          }
+        )
+      },
+      "Mismatching question type INTEGER and answer type decimal"
+    )
+  }
+
+  @Test
+  fun `check passes if date type question has date type answer`() {
+    QuestionnaireResponseValidator.checkQuestionnaireResponse(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.DATE
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = DateType()
+              }
+            )
+          }
+        )
+      }
+    )
+  }
+
+  @Test
+  fun `check fails if date type question has answer of wrong type`() {
+    assertCheckQuestionnaireResponseThrowsIllegalArgumentException(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.DATE
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = DecimalType(1.0)
+              }
+            )
+          }
+        )
+      },
+      "Mismatching question type DATE and answer type decimal"
+    )
+  }
+
+  @Test
+  fun `check passes if datetime type question has datetime type answer`() {
+    QuestionnaireResponseValidator.checkQuestionnaireResponse(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.DATETIME
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = DateTimeType()
+              }
+            )
+          }
+        )
+      }
+    )
+  }
+
+  @Test
+  fun `check fails if datetime type question has answer of wrong type`() {
+    assertCheckQuestionnaireResponseThrowsIllegalArgumentException(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.DATETIME
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = DecimalType(1.0)
+              }
+            )
+          }
+        )
+      },
+      "Mismatching question type DATETIME and answer type decimal"
+    )
+  }
+
+  @Test
+  fun `check passes if time type question has time type answer`() {
+    QuestionnaireResponseValidator.checkQuestionnaireResponse(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.TIME
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = TimeType()
+              }
+            )
+          }
+        )
+      }
+    )
+  }
+
+  @Test
+  fun `check fails if time type question has answer of wrong type`() {
+    assertCheckQuestionnaireResponseThrowsIllegalArgumentException(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.TIME
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = DecimalType(1.0)
+              }
+            )
+          }
+        )
+      },
+      "Mismatching question type TIME and answer type decimal"
+    )
+  }
+
+  @Test
+  fun `check passes if string type question has string type answer`() {
+    QuestionnaireResponseValidator.checkQuestionnaireResponse(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.STRING
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = StringType("")
+              }
+            )
+          }
+        )
+      }
+    )
+  }
+
+  @Test
+  fun `check fails if string type question has answer of wrong type`() {
+    assertCheckQuestionnaireResponseThrowsIllegalArgumentException(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.STRING
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = DecimalType(1.0)
+              }
+            )
+          }
+        )
+      },
+      "Mismatching question type STRING and answer type decimal"
+    )
+  }
+
+  @Test
+  fun `check passes if text type question has string type answer`() {
+    QuestionnaireResponseValidator.checkQuestionnaireResponse(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.TEXT
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = StringType("")
+              }
+            )
+          }
+        )
+      }
+    )
+  }
+
+  @Test
+  fun `check fails if text type question has answer of wrong type`() {
+    assertCheckQuestionnaireResponseThrowsIllegalArgumentException(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.TEXT
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = DecimalType(1.0)
+              }
+            )
+          }
+        )
+      },
+      "Mismatching question type TEXT and answer type decimal"
+    )
+  }
+
+  @Test
+  fun `check passes if url type question has url type answer`() {
+    QuestionnaireResponseValidator.checkQuestionnaireResponse(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.URL
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = UrlType("")
+              }
+            )
+          }
+        )
+      }
+    )
+  }
+
+  @Test
+  fun `check fails if url type question has answer of wrong type`() {
+    assertCheckQuestionnaireResponseThrowsIllegalArgumentException(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.URL
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = DecimalType(1.0)
+              }
+            )
+          }
+        )
+      },
+      "Mismatching question type URL and answer type decimal"
+    )
+  }
+
+  @Test
+  fun `check passes if choice type question has coding type answer`() {
+    QuestionnaireResponseValidator.checkQuestionnaireResponse(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.CHOICE
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = Coding()
+              }
+            )
+          }
+        )
+      }
+    )
+  }
+
+  @Test
+  fun `check fails if choice type question has answer of wrong type`() {
+    assertCheckQuestionnaireResponseThrowsIllegalArgumentException(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.CHOICE
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = DecimalType(1.0)
+              }
+            )
+          }
+        )
+      },
+      "Mismatching question type CHOICE and answer type decimal"
+    )
+  }
+
+  @Test
+  fun `check passes if open choice type question has coding type answer`() {
+    QuestionnaireResponseValidator.checkQuestionnaireResponse(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.OPENCHOICE
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = Coding()
+              }
+            )
+          }
+        )
+      }
+    )
+  }
+
+  @Test
+  fun `check passes if open choice type question has string type answer`() {
+    QuestionnaireResponseValidator.checkQuestionnaireResponse(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.OPENCHOICE
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = StringType("")
+              }
+            )
+          }
+        )
+      }
+    )
+  }
+
+  @Test
+  fun `check fails if open choice type question has answer of wrong type`() {
+    assertCheckQuestionnaireResponseThrowsIllegalArgumentException(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.OPENCHOICE
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = DecimalType(1.0)
+              }
+            )
+          }
+        )
+      },
+      "Mismatching question type OPENCHOICE and answer type decimal"
+    )
+  }
+
+  @Test
+  fun `check passes if attachment type question has attachment type answer`() {
+    QuestionnaireResponseValidator.checkQuestionnaireResponse(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.ATTACHMENT
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = Attachment()
+              }
+            )
+          }
+        )
+      }
+    )
+  }
+
+  @Test
+  fun `check fails if attachment type question has answer of wrong type`() {
+    assertCheckQuestionnaireResponseThrowsIllegalArgumentException(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.ATTACHMENT
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = DecimalType(1.0)
+              }
+            )
+          }
+        )
+      },
+      "Mismatching question type ATTACHMENT and answer type decimal"
+    )
+  }
+
+  @Test
+  fun `check passes if reference type question has reference type answer`() {
+    QuestionnaireResponseValidator.checkQuestionnaireResponse(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.REFERENCE
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = Reference()
+              }
+            )
+          }
+        )
+      }
+    )
+  }
+
+  @Test
+  fun `check fails if reference type question has answer of wrong type`() {
+    assertCheckQuestionnaireResponseThrowsIllegalArgumentException(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.REFERENCE
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = DecimalType(1.0)
+              }
+            )
+          }
+        )
+      },
+      "Mismatching question type REFERENCE and answer type decimal"
+    )
+  }
+
+  @Test
+  fun `check passes if quantity type question has quantity type answer`() {
+    QuestionnaireResponseValidator.checkQuestionnaireResponse(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.QUANTITY
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = Quantity()
+              }
+            )
+          }
+        )
+      }
+    )
+  }
+
+  @Test
+  fun `check fails if quantity type question has answer of wrong type`() {
+    assertCheckQuestionnaireResponseThrowsIllegalArgumentException(
+      Questionnaire().apply {
+        id = "questionnaire-1"
+        addItem(
+          Questionnaire.QuestionnaireItemComponent(
+            StringType("question-1"),
+            Enumeration(
+              Questionnaire.QuestionnaireItemTypeEnumFactory(),
+              Questionnaire.QuestionnaireItemType.QUANTITY
+            )
+          )
+        )
+      },
+      QuestionnaireResponse().apply {
+        questionnaire = "questionnaire-1"
+        addItem(
+          QuestionnaireResponse.QuestionnaireResponseItemComponent(StringType("question-1")).apply {
+            addAnswer(
+              QuestionnaireResponse.QuestionnaireResponseItemAnswerComponent().apply {
+                value = DecimalType(1.0)
+              }
+            )
+          }
+        )
+      },
+      "Mismatching question type QUANTITY and answer type decimal"
+    )
+  }
+
+  private fun assertCheckQuestionnaireResponseThrowsIllegalArgumentException(
+    questionnaire: Questionnaire,
+    questionnaireResponse: QuestionnaireResponse,
+    message: String
+  ) {
+    val exception =
+      assertThrows(IllegalArgumentException::class.java) {
+        QuestionnaireResponseValidator.checkQuestionnaireResponse(
+          questionnaire,
+          questionnaireResponse
+        )
+      }
+    assertThat(exception.message).isEqualTo(message)
   }
 }

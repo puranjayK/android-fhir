@@ -464,6 +464,7 @@ class QuestionnaireViewModelTest(private val questionnaireSource: QuestionnaireS
     val questionnaireResponse =
       QuestionnaireResponse().apply {
         id = "a-questionnaire-response"
+//        setQuestionnaire("a-questionnaire")
         addItem(
           QuestionnaireResponse.QuestionnaireResponseItemComponent().apply {
             linkId = "a-link-id"
@@ -480,6 +481,7 @@ class QuestionnaireViewModelTest(private val questionnaireSource: QuestionnaireS
           }
         )
       }
+    questionnaireResponse.questionnaire = "a-questionnaire"
 
     val viewModel = createQuestionnaireViewModel(questionnaire, questionnaireResponse)
 
